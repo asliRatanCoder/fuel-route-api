@@ -1,0 +1,531 @@
+{
+  "info": {
+    "name": "Fuel Route API",
+    "description": "Cheapest fuel stops along a US driving route. Start the server with `python manage.py runserver`, then run these top to bottom.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Coast to coast (GET)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/route/?start=New York, NY&finish=Los Angeles, CA",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "route",
+            ""
+          ],
+          "query": [
+            {
+              "key": "start",
+              "value": "New York, NY"
+            },
+            {
+              "key": "finish",
+              "value": "Los Angeles, CA"
+            }
+          ]
+        },
+        "description": "New York to Los Angeles: ~2,800 miles, several fuel stops, one routing call, zero geocoding calls. Open `map.url` from the response in a browser to see it drawn. Send it twice: the second answer comes from cache in a few ms."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "const plan = pm.response.json();",
+              "pm.test('at most one routing API call', () => pm.expect(plan.meta.external_api_calls.routing).to.be.at.most(1));",
+              "pm.test('stop costs add up to the total', () => {",
+              "  const sum = plan.fuel_stops.reduce((total, stop) => total + stop.cost, 0);",
+              "  pm.expect(sum).to.be.closeTo(plan.summary.total_fuel_cost, 0.05);",
+              "});",
+              "pm.test('never buys more than the tank holds', () => plan.fuel_stops.forEach(stop =>",
+              "  pm.expect(stop.fuel_on_arrival_gallons + stop.gallons_purchased).to.be.at.most(plan.vehicle.tank_gallons + 0.01)));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. JSON body (POST)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/route/",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "route",
+            ""
+          ]
+        },
+        "description": "Same endpoint with a JSON body. Note stop 1: just enough fuel to reach the much cheaper stop 2.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"start\": \"Chicago, IL\",\n  \"finish\": \"Denver, CO\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "const plan = pm.response.json();",
+              "pm.test('at most one routing API call', () => pm.expect(plan.meta.external_api_calls.routing).to.be.at.most(1));",
+              "pm.test('stop costs add up to the total', () => {",
+              "  const sum = plan.fuel_stops.reduce((total, stop) => total + stop.cost, 0);",
+              "  pm.expect(sum).to.be.closeTo(plan.summary.total_fuel_cost, 0.05);",
+              "});",
+              "pm.test('never buys more than the tank holds', () => plan.fuel_stops.forEach(stop =>",
+              "  pm.expect(stop.fuel_on_arrival_gallons + stop.gallons_purchased).to.be.at.most(plan.vehicle.tank_gallons + 0.01)));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Coordinates and full state names",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/route/?start=25.7617,-80.1918&finish=Seattle, Washington",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "route",
+            ""
+          ],
+          "query": [
+            {
+              "key": "start",
+              "value": "25.7617,-80.1918"
+            },
+            {
+              "key": "finish",
+              "value": "Seattle, Washington"
+            }
+          ]
+        },
+        "description": "Inputs can be \"lat,lng\" or \"City, State\"."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "const plan = pm.response.json();",
+              "pm.test('at most one routing API call', () => pm.expect(plan.meta.external_api_calls.routing).to.be.at.most(1));",
+              "pm.test('stop costs add up to the total', () => {",
+              "  const sum = plan.fuel_stops.reduce((total, stop) => total + stop.cost, 0);",
+              "  pm.expect(sum).to.be.closeTo(plan.summary.total_fuel_cost, 0.05);",
+              "});",
+              "pm.test('never buys more than the tank holds', () => plan.fuel_stops.forEach(stop =>",
+              "  pm.expect(stop.fuel_on_arrival_gallons + stop.gallons_purchased).to.be.at.most(plan.vehicle.tank_gallons + 0.01)));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Street address (geocoder fallback)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/route/?start=1600 Pennsylvania Ave NW, Washington, DC&finish=Nashville, TN",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "route",
+            ""
+          ],
+          "query": [
+            {
+              "key": "start",
+              "value": "1600 Pennsylvania Ave NW, Washington, DC"
+            },
+            {
+              "key": "finish",
+              "value": "Nashville, TN"
+            }
+          ]
+        },
+        "description": "A street address is not in the bundled gazetteer, so this one spends a single Nominatim call (see meta.external_api_calls.geocoding), cached afterwards."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "const plan = pm.response.json();",
+              "pm.test('at most one routing API call', () => pm.expect(plan.meta.external_api_calls.routing).to.be.at.most(1));",
+              "pm.test('stop costs add up to the total', () => {",
+              "  const sum = plan.fuel_stops.reduce((total, stop) => total + stop.cost, 0);",
+              "  pm.expect(sum).to.be.closeTo(plan.summary.total_fuel_cost, 0.05);",
+              "});",
+              "pm.test('never buys more than the tank holds', () => plan.fuel_stops.forEach(stop =>",
+              "  pm.expect(stop.fuel_on_arrival_gallons + stop.gallons_purchased).to.be.at.most(plan.vehicle.tank_gallons + 0.01)));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Pure minimum cost (stop_penalty=0)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/route/?start=New York, NY&finish=Los Angeles, CA&stop_penalty=0",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "route",
+            ""
+          ],
+          "query": [
+            {
+              "key": "start",
+              "value": "New York, NY"
+            },
+            {
+              "key": "finish",
+              "value": "Los Angeles, CA"
+            },
+            {
+              "key": "stop_penalty",
+              "value": "0"
+            }
+          ]
+        },
+        "description": "Without the per-stop penalty the optimiser chases every cent: compare the number of stops and the total with request 1."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "const plan = pm.response.json();",
+              "pm.test('at most one routing API call', () => pm.expect(plan.meta.external_api_calls.routing).to.be.at.most(1));",
+              "pm.test('stop costs add up to the total', () => {",
+              "  const sum = plan.fuel_stops.reduce((total, stop) => total + stop.cost, 0);",
+              "  pm.expect(sum).to.be.closeTo(plan.summary.total_fuel_cost, 0.05);",
+              "});",
+              "pm.test('never buys more than the tank holds', () => plan.fuel_stops.forEach(stop =>",
+              "  pm.expect(stop.fuel_on_arrival_gallons + stop.gallons_purchased).to.be.at.most(plan.vehicle.tank_gallons + 0.01)));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Leaving with a quarter tank",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/route/?start=Houston, TX&finish=Chicago, IL&initial_fuel_gallons=12.5",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "route",
+            ""
+          ],
+          "query": [
+            {
+              "key": "start",
+              "value": "Houston, TX"
+            },
+            {
+              "key": "finish",
+              "value": "Chicago, IL"
+            },
+            {
+              "key": "initial_fuel_gallons",
+              "value": "12.5"
+            }
+          ]
+        },
+        "description": "initial_fuel_gallons overrides the default full tank."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "const plan = pm.response.json();",
+              "pm.test('at most one routing API call', () => pm.expect(plan.meta.external_api_calls.routing).to.be.at.most(1));",
+              "pm.test('stop costs add up to the total', () => {",
+              "  const sum = plan.fuel_stops.reduce((total, stop) => total + stop.cost, 0);",
+              "  pm.expect(sum).to.be.closeTo(plan.summary.total_fuel_cost, 0.05);",
+              "});",
+              "pm.test('never buys more than the tank holds', () => plan.fuel_stops.forEach(stop =>",
+              "  pm.expect(stop.fuel_on_arrival_gallons + stop.gallons_purchased).to.be.at.most(plan.vehicle.tank_gallons + 0.01)));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Short trip, no stop needed",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/route/?start=Dallas, TX&finish=Houston, TX",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "route",
+            ""
+          ],
+          "query": [
+            {
+              "key": "start",
+              "value": "Dallas, TX"
+            },
+            {
+              "key": "finish",
+              "value": "Houston, TX"
+            }
+          ]
+        },
+        "description": "240 miles on a 500-mile tank."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "const plan = pm.response.json();",
+              "pm.test('at most one routing API call', () => pm.expect(plan.meta.external_api_calls.routing).to.be.at.most(1));",
+              "pm.test('stop costs add up to the total', () => {",
+              "  const sum = plan.fuel_stops.reduce((total, stop) => total + stop.cost, 0);",
+              "  pm.expect(sum).to.be.closeTo(plan.summary.total_fuel_cost, 0.05);",
+              "});",
+              "pm.test('never buys more than the tank holds', () => plan.fuel_stops.forEach(stop =>",
+              "  pm.expect(stop.fuel_on_arrival_gallons + stop.gallons_purchased).to.be.at.most(plan.vehicle.tank_gallons + 0.01)));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "8. Error: missing parameter",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/route/?start=Dallas, TX",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "route",
+            ""
+          ],
+          "query": [
+            {
+              "key": "start",
+              "value": "Dallas, TX"
+            }
+          ]
+        },
+        "description": "Validation errors come back in the same error envelope."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('400 invalid_request', () => {",
+              "  pm.response.to.have.status(400);",
+              "  pm.expect(pm.response.json().error.code).to.eql('invalid_request');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "9. Error: outside the USA",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/route/?start=51.5074,-0.1278&finish=Boston, MA",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "route",
+            ""
+          ],
+          "query": [
+            {
+              "key": "start",
+              "value": "51.5074,-0.1278"
+            },
+            {
+              "key": "finish",
+              "value": "Boston, MA"
+            }
+          ]
+        },
+        "description": ""
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('400 location_outside_usa', () => {",
+              "  pm.response.to.have.status(400);",
+              "  pm.expect(pm.response.json().error.code).to.eql('location_outside_usa');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "10. Error: no drivable route",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/route/?start=Honolulu, HI&finish=Denver, CO",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "route",
+            ""
+          ],
+          "query": [
+            {
+              "key": "start",
+              "value": "Honolulu, HI"
+            },
+            {
+              "key": "finish",
+              "value": "Denver, CO"
+            }
+          ]
+        },
+        "description": ""
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('422 no_route', () => {",
+              "  pm.response.to.have.status(422);",
+              "  pm.expect(pm.response.json().error.code).to.eql('no_route');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "11. Error: stretch with no fuel in the price list",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/route/?start=Seattle, WA&finish=Los Angeles, CA",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "route",
+            ""
+          ],
+          "query": [
+            {
+              "key": "start",
+              "value": "Seattle, WA"
+            },
+            {
+              "key": "finish",
+              "value": "Los Angeles, CA"
+            }
+          ]
+        },
+        "description": "The supplied price list has no stations along I-5 in California, so this trip cannot be fuelled from it."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('422 no_feasible_fuel_plan', () => {",
+              "  pm.response.to.have.status(422);",
+              "  pm.expect(pm.response.json().error.code).to.eql('no_feasible_fuel_plan');",
+              "});"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
