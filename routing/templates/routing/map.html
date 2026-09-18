@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fuel Route Planner</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+  <style>
+    :root { --ink: #16202a; --muted: #5d6b78; --line: #e3e8ee; --accent: #0b6e4f; --bg: #f6f8fa; }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body { display: flex; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--ink); }
+    aside { width: 380px; flex: none; display: flex; flex-direction: column; border-right: 1px solid var(--line); background: #fff; }
+    #map { flex: 1; min-height: 320px; background: var(--bg); }
+    header { padding: 18px 20px 6px; }
+    h1 { font-size: 18px; margin: 0 0 2px; }
+    header p { margin: 0; color: var(--muted); font-size: 13px; }
+    form { padding: 12px 20px 16px; display: grid; gap: 10px; border-bottom: 1px solid var(--line); }
+    label { display: grid; gap: 4px; font-size: 12px; font-weight: 600; color: var(--muted); }
+    input { font: inherit; padding: 9px 10px; border: 1px solid #cfd7df; border-radius: 6px; color: var(--ink); }
+    input:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: var(--accent); }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    button { font: inherit; font-weight: 600; padding: 10px; border: 0; border-radius: 6px; background: var(--accent); color: #fff; cursor: pointer; }
+    button:disabled { opacity: .6; cursor: progress; }
+    #results { flex: 1; overflow-y: auto; padding: 16px 20px 24px; }
+    .error { padding: 10px 12px; border-radius: 6px; background: #fdecea; color: #8a1c13; }
+    .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
+    .card { padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+    .card b { display: block; font-size: 17px; }
+    .card span { font-size: 12px; color: var(--muted); }
+    .card.total { grid-column: 1 / -1; background: #e8f5ef; border-color: #bfe3d2; }
+    .card.total b { font-size: 24px; color: var(--accent); }
+    h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 16px 0 8px; }
+    ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+    li { display: grid; grid-template-columns: 28px 1fr auto; gap: 10px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
+    li:hover { border-color: var(--accent); }
+    .pin { width: 26px; height: 26px; border-radius: 50%; background: var(--accent); color: #fff; font-weight: 700; font-size: 12px; display: grid; place-items: center; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.4); }
+    .pin.start { background: #1d6fd1; } .pin.finish { background: #c0392b; }
+    li small, .meta { color: var(--muted); font-size: 12px; }
+    li .amount { text-align: right; white-space: nowrap; }
+    .meta { margin-top: 16px; }
+    @media (max-width: 760px) { body { flex-direction: column; } aside { width: auto; border-right: 0; } #results { max-height: 45vh; } #map { min-height: 55vh; } }
+  </style>
+</head>
+<body>
+  <aside>
+    <header>
+      <h1>Fuel Route Planner</h1>
+      <p>Cheapest fuel stops for a 500-mile-range, 10 mpg vehicle.</p>
+    </header>
+    <form id="form">
+      <label>Start <input name="start" placeholder="New York, NY" required></label>
+      <label>Finish <input name="finish" placeholder="Los Angeles, CA" required></label>
+      <div class="row">
+        <label>Starting fuel (gal) <input name="initial_fuel_gallons" type="number" min="0" max="50" step="any" placeholder="50 (full)"></label>
+        <label>Stop penalty ($) <input name="stop_penalty" type="number" min="0" max="100" step="any" placeholder="5"></label>
+      </div>
+      <button id="go">Plan route</button>
+    </form>
+    <div id="results"><p class="meta">Enter two US locations &mdash; &ldquo;City, ST&rdquo;, an address, or &ldquo;lat,lng&rdquo;.</p></div>
+  </aside>
+  <div id="map"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script>
+    const API_URL = "{% url 'route-plan' %}";
+    const form = document.getElementById('form');
+    const results = document.getElementById('results');
+    const button = document.getElementById('go');
+
+    const map = L.map('map').setView([39.5, -98.35], 4);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 18, attribution: '&copy; OpenStreetMap contributors',
+    }).addTo(map);
+    const layer = L.layerGroup().addTo(map);
+
+    const el = (tag, className, text) => {
+      const node = document.createElement(tag);
+      if (className) node.className = className;
+      if (text !== undefined) node.textContent = text;
+      return node;
+    };
+    const money = (value) => '$' + Number(value).toFixed(2);
+    const pin = (label, kind = '') => L.divIcon({
+      className: '', html: `<div class="pin ${kind}">${label}</div>`, iconSize: [26, 26], iconAnchor: [13, 13],
+    });
+
+    function card(value, label, className = 'card') {
+      const node = el('div', className);
+      node.append(el('b', '', value), el('span', '', label));
+      return node;
+    }
+
+    function render(plan) {
+      layer.clearLayers();
+      results.replaceChildren();
+
+      const [route, start, finish] = plan.map.geojson.features;
+      const line = L.geoJSON(route, { style: { color: '#1d6fd1', weight: 4, opacity: .85 } }).addTo(layer);
+      const flip = ([lng, lat]) => [lat, lng];
+      L.marker(flip(start.geometry.coordinates), { icon: pin('A', 'start') }).bindPopup(plan.start.resolved_as).addTo(layer);
+      L.marker(flip(finish.geometry.coordinates), { icon: pin('B', 'finish') }).bindPopup(plan.finish.resolved_as).addTo(layer);
+      map.fitBounds(line.getBounds(), { padding: [30, 30] });
+
+      const cards = el('div', 'cards');
+      cards.append(
+        card(money(plan.summary.total_fuel_cost), 'total spent on fuel', 'card total'),
+        card(plan.route.distance_miles.toLocaleString() + ' mi', 'distance'),
+        card(plan.route.duration_hours.toFixed(1) + ' h', 'driving time'),
+        card(plan.summary.total_gallons_purchased + ' gal', 'fuel purchased'),
+        card(String(plan.summary.number_of_stops), 'fuel stops'),
+      );
+      results.append(cards, el('h2', '', 'Fuel stops'));
+
+      const list = el('ol');
+      for (const stop of plan.fuel_stops) {
+        const popup = el('div');
+        popup.append(
+          el('b', '', stop.name), el('br'),
+          `${stop.address}, ${stop.city}, ${stop.state}`, el('br'),
+          `$${stop.price_per_gallon.toFixed(3)}/gal × ${stop.gallons_purchased} gal = ${money(stop.cost)}`,
+        );
+        const marker = L.marker([stop.latitude, stop.longitude], { icon: pin(stop.stop) }).bindPopup(popup).addTo(layer);
+
+        const item = el('li');
+        const body = el('div');
+        body.append(
+          el('div', '', stop.name),
+          el('small', '', `${stop.city}, ${stop.state} · mile ${stop.route_mile} · $${stop.price_per_gallon.toFixed(3)}/gal`),
+        );
+        const amount = el('div', 'amount');
+        amount.append(el('div', '', money(stop.cost)), el('small', '', stop.gallons_purchased + ' gal'));
+        item.append(el('div', 'pin', stop.stop), body, amount);
+        item.addEventListener('click', () => { map.setView(marker.getLatLng(), 9); marker.openPopup(); });
+        list.append(item);
+      }
+      if (!plan.fuel_stops.length) list.append(el('small', '', 'None needed.'));
+      results.append(list);
+
+      for (const note of plan.notes) results.append(el('p', 'meta', note));
+      const calls = plan.meta.external_api_calls;
+      results.append(el('p', 'meta',
+        `${plan.meta.elapsed_ms} ms · routing API calls: ${calls.routing} · geocoding API calls: ${calls.geocoding}` +
+        (plan.meta.served_from_cache ? ' · served from cache' : '')));
+    }
+
+    async function run() {
+      const params = new URLSearchParams();
+      for (const [key, value] of new FormData(form)) if (value.trim()) params.set(key, value.trim());
+      history.replaceState(null, '', '?' + params);
+      button.disabled = true;
+      button.textContent = 'Planning…';
+      try {
+        const response = await fetch(`${API_URL}?${params}`);
+        const body = await response.json();
+        if (!response.ok) {
+          const fields = Object.entries(body.error.fields || {}).map(([k, v]) => `${k}: ${[].concat(v).join(' ')}`);
+          throw new Error([body.error.message, ...fields].join(' '));
+        }
+        render(body);
+      } catch (error) {
+        layer.clearLayers();
+        results.replaceChildren(el('div', 'error', error.message));
+      } finally {
+        button.disabled = false;
+        button.textContent = 'Plan route';
+      }
+    }
+
+    form.addEventListener('submit', (event) => { event.preventDefault(); run(); });
+
+    // Deep link: /?start=...&finish=... plans immediately.
+    const query = new URLSearchParams(location.search);
+    for (const [key, value] of query) if (form.elements[key]) form.elements[key].value = value;
+    if (query.get('start') && query.get('finish')) run();
+  </script>
+</body>
+</html>
